@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TransactionStatus {
+  PENDING
+  PROCESSING
+  CONFIRMED
+  FAILED
+  REFUNDED
+  EXPIRED
+}
+
+enum WebhookStatus {
+  PENDING
+  DELIVERED
+  FAILED
+  RETRYING
+  DISABLED
+}
+
+enum ApiKeyType {
+  SECRET     // sk_test_ or sk_live_
+  PUBLISHABLE // pk_test_ or pk_live_
+}
+
+model Merchant {
+  id        String   @id @default(cuid())
+  email     String   @unique
+  name      String
+  website   String?
+  
+  // Settings
+  defaultCurrency String @default("USD")
+  webhookUrl      String?
+  webhookSecret   String? // For webhook signature verification
+  
+  // Metadata
+  metadata  Json?
+  isActive  Boolean  @default(true)
+  
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  // Relations
+  apiKeys      ApiKey[]
+  transactions Transaction[]
+  sessions     CheckoutSession[]
+  
+  @@map("merchants")
+}
+
+model ApiKey {
+  id         String     @id @default(cuid())
+  merchantId String
+  merchant   Merchant   @relation(fields: [merchantId], references: [id], onDelete: Cascade)
+  
+  keyHash    String     @unique // bcrypt hash of actual key
+  keyPrefix  String     // first 8 chars for identification (sk_test_12345678...)
+  name       String     // "Production API", "Development", etc.
+  type       ApiKeyType @default(SECRET)
+  isActive   Boolean    @default(true)
+  
+  // Usage tracking
+  lastUsedAt DateTime?
+  usageCount Int       @default(0)
+  
+  createdAt  DateTime  @default(now())
+  expiresAt  DateTime? // Optional expiration
+  
+  @@index([merchantId, isActive])
+  @@map("api_keys")
+}
+
+model Transaction {
+  id         String            @id @default(cuid())
+  merchantId String
+  merchant   Merchant          @relation(fields: [merchantId], references: [id])
+  
+  // Payment details
+  amountUsd     Decimal @db.Decimal(12, 2) // USD amount requested
+  amountSbtc    Decimal @db.Decimal(20, 8) // sBTC amount (calculated at creation)
+  exchangeRate  Decimal @db.Decimal(15, 2) // BTC/USD rate at time of creation
+  
+  description   String?
+  customerEmail String?
+  customerName  String?
+  
+  // Blockchain data
+  txId          String? @unique // Stacks transaction ID
+  blockHeight   Int?            // Block confirmation
+  blockHash     String?         // Block hash for verification
+  senderAddress String?         // Customer's Stacks address
+  
+  // Status tracking
+  status        TransactionStatus @default(PENDING)
+  failureReason String?           // Error details if failed
+  
+  // URLs for redirect
+  successUrl    String?
+  cancelUrl     String?
+  
+  // Timing
+  expiresAt     DateTime          // Payment window
+  confirmedAt   DateTime?         // When confirmed on-chain
+  
+  // Metadata & receipts
+  metadata      Json?
+  receiptUrl    String?
+  
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
+  
+  // Relations
+  session       CheckoutSession?
+  webhooks      Webhook[]
+  refunds       Refund[]
+  
+  @@index([merchantId, status])
+  @@index([txId])
+  @@index([status, expiresAt])
+  @@index([createdAt])
+  @@map("transactions")
+}
+
+model CheckoutSession {
+  id            String   @id @default(cuid())
+  merchantId    String
+  
+  // Payment config
+  amountUsd     Decimal  @db.Decimal(12, 2)
+  amountSbtc    Decimal? @db.Decimal(20, 8)
+  currency      String   @default("USD")
+  description   String?
+  
+  // Customer data
+  customerEmail String?
+  customerName  String?
+  
+  // Flow control
+  successUrl    String
+  cancelUrl     String
+  
+  // Session state
+  isCompleted   Boolean  @default(false)
+  transactionId String?  @unique
+  transaction   Transaction? @relation(fields: [transactionId], references: [id])
+  
+  // Timing
+  expiresAt     DateTime
+  completedAt   DateTime?
+  
+  // Metadata
+  metadata      Json?
+  
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+  
+  @@index([merchantId, isCompleted])
+  @@index([expiresAt])
+  @@map("checkout_sessions")
+}
+
+model Webhook {
+  id            String        @id @default(cuid())
+  transactionId String
+  transaction   Transaction   @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  
+  // Delivery config
+  url           String
+  event         String        // "payment.confirmed", "payment.failed", etc.
+  payload       Json
+  signature     String?       // HMAC signature for verification
+  
+  // Retry logic
+  status        WebhookStatus @default(PENDING)
+  attempts      Int           @default(0)
+  maxAttempts   Int           @default(5)
+  
+  // Timing
+  scheduledAt   DateTime      @default(now())
+  lastAttemptAt DateTime?
+  nextRetryAt   DateTime?
+  deliveredAt   DateTime?
+  
+  // Response tracking
+  responseStatus Int?
+  responseBody   String?
+  responseTime   Int?          // Response time in ms
+  
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  
+  @@index([status, nextRetryAt])
+  @@index([transactionId])
+  @@map("webhooks")
+}
+
+model Refund {
+  id            String      @id @default(cuid())
+  transactionId String
+  transaction   Transaction @relation(fields: [transactionId], references: [id])
+  
+  amountUsd     Decimal     @db.Decimal(12, 2)
+  amountSbtc    Decimal     @db.Decimal(20, 8)
+  reason        String?
+  
+  // Blockchain data
+  refundTxId    String?     @unique
+  refundStatus  TransactionStatus @default(PENDING)
+  
+  processedAt   DateTime?
+  createdAt     DateTime    @default(now())
+  
+  @@index([transactionId])
+  @@map("refunds")
+}
+
+// Rate limiting and usage tracking
+model RateLimit {
+  id          String   @id @default(cuid())
+  identifier  String   // API key hash or IP address
+  endpoint    String   // API endpoint pattern
+  requests    Int      @default(1)
+  windowStart DateTime @default(now())
+  
+  @@unique([identifier, endpoint, windowStart])
+  @@index([windowStart])
+  @@map("rate_limits")
+}

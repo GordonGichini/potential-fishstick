@@ -1,0 +1,27 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "lib": ["ES2022"],
+    "moduleResolution": "node",
+    "strict": true,
+    "esModuleInterop": true,
+    "allowSyntheticDefaultImports": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "baseUrl": ".",
+    "paths": {
+      "@sbtc-gateway/shared": ["packages/shared/src"],
+      "@sbtc-gateway/sdk": ["packages/sdk/src"],
+      "@sbtc-gateway/contracts": ["packages/contracts/src"]
+    },
+    "rootDir": ".",
+    "outDir": "dist",
+    "declaration": true,
+    "declarationMap": true,
+    "sourceMap": true
+  },
+  "include": ["apps/**/*", "packages/**/*", "prisma/**/*"],
+  "exclude": ["node_modules", "dist", "**/node_modules", "**/dist"]
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@sbtc-gateway/sdk",
+  "version": "0.1.0",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@sbtc-gateway/shared": "workspace:*",
+    "@stacks/transactions": "^6.15.0",
+    "@stacks/network": "^6.15.0",
+    "@stacks/auth": "^6.15.0",
+    "decimal.js": "^10.4.3",
+    "cross-fetch": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.5.0"
+  }
+}
